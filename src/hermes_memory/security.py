@@ -54,6 +54,22 @@ _GROUPS = [
 ]
 
 
+_SECRET_PATTERNS = [re.compile(p, re.IGNORECASE) for p in _SECRETS]
+
+
+_PEM_BLOCK = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.DOTALL)
+_AWS_SECRET = re.compile(r"\baws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{20,}", re.IGNORECASE)
+
+
+def redact(text: str) -> str:
+    """Replace anything credential-shaped with [REDACTED] (used before archiving transcripts)."""
+    text = _PEM_BLOCK.sub("[REDACTED]", text)  # whole key block, not just its header line
+    text = _AWS_SECRET.sub("[REDACTED]", text)
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    return text
+
+
 def scan(text: str) -> list[str]:
     """Return the reasons ``text`` is unsafe to store; an empty list means it is clean."""
     reasons = [label for label, patterns in _GROUPS if any(p.search(text) for p in patterns)]

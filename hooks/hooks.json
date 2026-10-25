@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --quiet --no-dev --directory \"${CLAUDE_PLUGIN_ROOT}\" hermes-memory session-start",
+            "command": "uv run --quiet --frozen --no-dev --directory \"${CLAUDE_PLUGIN_ROOT}\" hermes-memory session-start",
             "timeout": 120
           }
         ]
@@ -17,7 +17,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --quiet --no-dev --directory \"${CLAUDE_PLUGIN_ROOT}\" hermes-memory hook post-tool",
+            "command": "uv run --quiet --frozen --no-dev --directory \"${CLAUDE_PLUGIN_ROOT}\" hermes-memory hook post-tool",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --frozen --no-dev --directory \"${CLAUDE_PLUGIN_ROOT}\" hermes-memory hook stop",
             "timeout": 30
           }
         ]

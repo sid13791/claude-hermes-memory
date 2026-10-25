@@ -46,3 +46,13 @@ def post_tool(stdin_text: str) -> str:
     if not result:
         return ""
     return json.dumps({"systemMessage": notice_for(result)}, ensure_ascii=False)
+
+
+def transcript_path(stdin_text: str) -> str | None:
+    """Stop / SessionEnd hooks receive the current transcript path in their JSON input."""
+    try:
+        payload = json.loads(stdin_text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    path = payload.get("transcript_path") if isinstance(payload, dict) else None
+    return path if isinstance(path, str) and path else None

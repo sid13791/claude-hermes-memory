@@ -2,7 +2,7 @@
   "mcpServers": {
     "hermes-memory": {
       "command": "uv",
-      "args": ["run", "--quiet", "--no-dev", "--directory", "${CLAUDE_PLUGIN_ROOT}", "hermes-memory-server"]
+      "args": ["run", "--quiet", "--frozen", "--no-dev", "--directory", "${CLAUDE_PLUGIN_ROOT}", "hermes-memory-server"]
     }
   }
 }

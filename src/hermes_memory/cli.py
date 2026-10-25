@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from . import doctor, history, hooks, store
+from . import archive, doctor, history, hooks, store
 
 
 def _print(text: str) -> None:
@@ -14,6 +14,13 @@ def _print(text: str) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     print(text)
+
+
+def _read_stdin() -> str:
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:  # already a text stream (tests, some shells)
+        return sys.stdin.read()
+    return buffer.read().decode("utf-8", errors="replace")
 
 
 def _pending_id(value: str) -> str:
@@ -34,7 +41,11 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("approval").add_argument("mode", nargs="?")
     sub.add_parser("log", help="recent memory activity").add_argument("limit", type=int, nargs="?", default=20)
     sub.add_parser("doctor", help="health check")
-    sub.add_parser("hook").add_argument("event", choices=["post-tool"])
+    sub.add_parser("hook").add_argument("event", choices=["post-tool", "stop"])
+    recall = sub.add_parser("recall", help="search past conversations")
+    recall.add_argument("query", nargs="+")
+    recall.add_argument("--project", default="")
+    sub.add_parser("archive", help="index every Claude Code transcript into the archive")
     return parser
 
 
@@ -70,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     home = store.default_home()
 
     if args.cmd == "session-start":
+        _safe_sweep(home, budget_seconds=3)
         _print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                                   "additionalContext": store.render_snapshot(home)}}))
     elif args.cmd == "show":
@@ -88,9 +100,43 @@ def main(argv: list[str] | None = None) -> int:
         _print(report)
         return 0 if ok else 1
     elif args.cmd == "hook":
-        out = hooks.post_tool(sys.stdin.read())
-        if out:
-            _print(out)
+        # Claude Code sends UTF-8; Windows would otherwise decode stdin as cp1252.
+        return _hook(args.event, _read_stdin())
+    elif args.cmd == "recall":
+        _safe_sweep(home, budget_seconds=5)
+        _print(archive.render_hits(archive.search(home, " ".join(args.query), limit=10, project=args.project)))
+    elif args.cmd == "archive":
+        result = archive.sweep(home)
+        totals = archive.stats(home)
+        _print(f"indexed {result['messages']} new messages from {result['files']} transcript files\n"
+               f"archive now holds sessions: {totals['sessions']}, messages: {totals['messages']}, "
+               f"oldest: {totals['oldest'] or '-'}")
+    return 0
+
+
+def _safe_sweep(home, budget_seconds: float) -> None:
+    """Archiving is best-effort: it must never stop the notebook from loading."""
+    try:
+        archive.sweep(home, budget_seconds=budget_seconds)
+    except Exception as exc:  # noqa: BLE001 - surfaced in /memory-doctor, never fatal here
+        history.record(home, "archive-error", reason=str(exc)[:200])
+
+
+def _hook(event: str, stdin_text: str) -> int:
+    if event == "post-tool":
+        try:
+            out = hooks.post_tool(stdin_text)
+            if out:
+                _print(out)
+        except Exception as exc:  # noqa: BLE001 - a notice must never break the session
+            history.record(store.default_home(), "hook-error", reason=str(exc)[:200])
+        return 0
+    path = hooks.transcript_path(stdin_text)
+    if path:
+        try:
+            archive.index_file(store.default_home(), path)
+        except Exception as exc:  # noqa: BLE001 - a hook must never break the session
+            history.record(store.default_home(), "archive-error", reason=str(exc)[:200])
     return 0
 
 

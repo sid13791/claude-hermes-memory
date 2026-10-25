@@ -15,5 +15,3 @@ def test_server_exposes_no_approval_tool():
     assert names == set()
 
 
-def test_server_registers_only_the_memory_tool():
-    assert server.registered_tool_names() == ["memory"]

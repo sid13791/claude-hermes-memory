@@ -9,3 +9,5 @@ build/
 *.egg-info/
 *.tmp
 .env
+.mypy_cache/
+.ruff_cache/

@@ -18,8 +18,14 @@ Claude Code's own per-project memory (which keeps working as before).
 | `memory` MCP tool | Claude adds, patches or removes notes. Over the cap → refused; Claude must merge or delete first. |
 | Security scan | Blocks prompt-injection phrases, API keys / passwords, exfiltration commands and invisible unicode. |
 | Approval queue | Notes can wait for your yes/no before they are saved (see below). |
+| Chat archive | Every chat is copied into `archive.db` (SQLite full-text search) after each turn and at session end, with secrets redacted. Claude Code deletes transcripts after 30 days; the archive keeps them. |
+| `recall` MCP tool | Claude searches past chats ("what did we decide about X?") and can scroll around a hit. No LLM cost. |
 
 Files live in `~/.claude/hermes-memory/` (override with `HERMES_MEMORY_HOME`).
+
+**Privacy:** `archive.db` holds the text of your chats (user and assistant messages, not tool output), on your
+machine only. Credential-shaped strings are redacted before storage, but anything else you paste stays in it.
+Delete the file to wipe the archive.
 
 ### Approval modes
 
@@ -62,7 +68,9 @@ A later release will add in-chat yes/no confirmation that reads your typed reply
 | `/memory-reject <id\|all>` | Throw a waiting note away |
 | `/memory-approval [off\|auto\|on]` | Show or change the approval mode |
 | `/memory-log [n]` | Recent activity: saved / waiting / approved / rejected / blocked, with project and reason |
-| `/memory-doctor` | Health check: folder, config, size limits, approval queue, MCP SDK |
+| `/memory-doctor` | Health check: folder, config, size limits, approval queue, MCP SDK, chat archive |
+| `/recall <words>` | Search all your past Claude Code chats, across every project |
+| `/memory-archive` | Copy every existing transcript into the archive (safe to re-run) |
 
 Every memory change also shows a one-line notice in the chat, for example `💾 Memory saved (52/1,375)` or
 `⏳ Memory waiting for approval #3 — /memory-pending to review`.
@@ -89,8 +97,8 @@ uv run pytest --cov=hermes_memory
 
 ## Roadmap
 
-1. **Shared notebook**: this release.
-2. Chat archive with full-text search (`recall`), saved before Claude Code's 30-day transcript cleanup.
+1. **Shared notebook**: done in 0.1.x.
+2. **Chat archive + `recall`**: done in 0.2.0.
 3. Learning loop: save reminders, flush before compaction, in-chat yes/no confirmation via a prompt hook.
 4. `/memory-import`: merge existing per-project memory folders, flagging duplicates and contradictions.
 5. Optional Google OKF (Open Knowledge Format) export and lookup.

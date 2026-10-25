@@ -396,6 +396,8 @@ You have a persistent memory shared across ALL projects (the hermes-memory plugi
   Skip trivia, things easy to re-discover, raw data dumps, and session-only details.
 - Keep entries short and dense. When a store is above 80%, merge entries before adding new ones.
 - This block is a snapshot from session start; writes made now appear in the next session.
+- Use the `recall` tool to search past conversations (all projects) when the user refers to earlier
+  work or when an earlier decision would stop you re-asking. Do not store chat history in memory.
 - If a write comes back "waiting for approval", tell the user in one line what you want to save and ask
   them to confirm. Never claim it is saved."""
 

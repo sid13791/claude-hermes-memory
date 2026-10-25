@@ -7,7 +7,7 @@ import json
 import time
 from pathlib import Path
 
-from . import history, store
+from . import archive, history, store
 
 Check = tuple[str, bool, str]  # (name, ok, detail)
 
@@ -82,9 +82,21 @@ def _activity(home: Path) -> Check:
     return ("activity", True, f"last: {last[0].get('event')} at {last[0].get('ts')}")
 
 
+def _archive(home: Path) -> Check:
+    try:
+        totals = archive.stats(home)
+    except Exception as exc:  # noqa: BLE001 - report any database problem as a failed check
+        return ("chat archive", False, f"{home / archive.DB_FILE}: {exc}")
+    errors = [e for e in history.recent(home, limit=50) if e.get("event") == "archive-error"]
+    detail = f"{totals['sessions']} sessions, {totals['messages']} messages, oldest {totals['oldest'] or '-'}"
+    if errors:
+        return ("chat archive", False, f"{detail}; last error: {errors[-1].get('reason')}")
+    return ("chat archive", True, detail)
+
+
 def run(home: Path) -> tuple[bool, str]:
     checks = [_home_writable(home), _config(home), *_stores(home), _pending(home), _lock(home),
-              _mcp_sdk(), _activity(home)]
+              _mcp_sdk(), _archive(home), _activity(home)]
     lines = [f"{'OK  ' if ok else 'FAIL'}  {name:<24} {detail}" for name, ok, detail in checks]
     lines.append("")
     lines.append("If all checks pass but Claude never uses the memory tool: run /mcp and confirm "

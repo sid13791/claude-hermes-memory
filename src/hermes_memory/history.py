@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 LOG_FILE = "history.jsonl"
+MAX_BYTES = 1_000_000  # keep the newest half when the log grows past this
 
 
 def _project() -> str:
@@ -22,8 +23,12 @@ def record(home: Path, event: str, *, target: str | None = None, detail: str = "
              "project": _project(), "detail": detail, "reason": reason}
     try:
         home.mkdir(parents=True, exist_ok=True)
-        with (home / LOG_FILE).open("a", encoding="utf-8") as fh:
+        path = home / LOG_FILE
+        with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        if path.stat().st_size > MAX_BYTES:
+            lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+            path.write_text("".join(lines[len(lines) // 2:]), encoding="utf-8")
     except OSError:
         pass
 
