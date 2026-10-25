@@ -1,0 +1,11 @@
+{
+  "name": "claude-hermes-memory",
+  "owner": { "name": "Siddharth" },
+  "plugins": [
+    {
+      "name": "hermes-memory",
+      "source": "./",
+      "description": "Shared, capped, approval-gated memory loaded into every Claude Code session."
+    }
+  ]
+}

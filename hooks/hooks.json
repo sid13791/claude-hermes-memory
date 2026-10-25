@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --no-dev --directory \"${CLAUDE_PLUGIN_ROOT}\" hermes-memory session-start",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}
