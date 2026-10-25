@@ -7,7 +7,7 @@ import json
 import time
 from pathlib import Path
 
-from . import archive, history, store
+from . import archive, history, okf, store
 
 Check = tuple[str, bool, str]  # (name, ok, detail)
 
@@ -94,9 +94,21 @@ def _archive(home: Path) -> Check:
     return ("chat archive", True, detail)
 
 
+def _okf_bundles(home: Path) -> list[Check]:
+    checks = []
+    for root in okf.bundles(home):
+        if not root.is_dir():
+            checks.append(("OKF bundle", False, f"{root} is missing; /memory-okf remove it or restore the folder"))
+            continue
+        issues = okf.problems(root)
+        detail = f"{root}: {len(okf.concepts(root))} pages"
+        checks.append(("OKF bundle", True, detail + (f", {len(issues)} pages without a 'type' (ignored)" if issues else "")))
+    return checks
+
+
 def run(home: Path) -> tuple[bool, str]:
     checks = [_home_writable(home), _config(home), *_stores(home), _pending(home), _lock(home),
-              _mcp_sdk(), _archive(home), _activity(home)]
+              _mcp_sdk(), _archive(home), *_okf_bundles(home), _activity(home)]
     lines = [f"{'OK  ' if ok else 'FAIL'}  {name:<24} {detail}" for name, ok, detail in checks]
     lines.append("")
     lines.append("If all checks pass but Claude never uses the memory tool: run /mcp and confirm "

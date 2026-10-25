@@ -1,6 +1,6 @@
 {
   "name": "hermes-memory",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "Hermes-style persistent memory for Claude Code: a shared notebook (USER.md + MEMORY.md) loaded into every session in every project, with size caps, a security scan and an approval queue.",
   "author": { "name": "Siddharth" },
   "homepage": "https://github.com/sid13791/claude-hermes-memory",

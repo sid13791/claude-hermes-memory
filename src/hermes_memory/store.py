@@ -120,19 +120,19 @@ def load_config(home: Path) -> dict:
     return config
 
 
-def _save_config(home: Path, config: dict) -> None:
+def save_config(home: Path, config: dict) -> None:
     _write_text(home / "config.json", json.dumps(config, indent=2))
 
 
 def set_approval(home: Path, mode: str) -> None:
     if mode not in MODES:
         raise ValueError(f"approval must be one of {', '.join(MODES)}")
-    _save_config(home, {**load_config(home), "approval": mode})
+    save_config(home, {**load_config(home), "approval": mode})
 
 
 def set_learn_every(home: Path, every: int) -> None:
     """How many user prompts between learning nudges (0 turns them off)."""
-    _save_config(home, {**load_config(home), "learn_every": max(0, int(every))})
+    save_config(home, {**load_config(home), "learn_every": max(0, int(every))})
 
 
 def set_limits(home: Path, *, user: int | None = None, memory: int | None = None) -> None:
@@ -141,7 +141,7 @@ def set_limits(home: Path, *, user: int | None = None, memory: int | None = None
         config = {**config, "user_char_limit": user}
     if memory is not None:
         config = {**config, "memory_char_limit": memory}
-    _save_config(home, config)
+    save_config(home, config)
 
 
 def read_entries(home: Path, target: str) -> list[str]:
@@ -297,14 +297,15 @@ def stage(home: Path, target: str, operations: list[dict], pinned: list[str], re
     Notes and rules may be confirmed in chat, one at a time. Skills never are: their full text has to be
     read with /memory-pending and approved with /memory-approve.
     """
-    in_chat = target != "skill"
+    in_chat = target not in ("skill", "okf")  # files others read: explicit approval
     staged_id, ask = _stage(home, target, operations, pinned, reason, in_chat)
     history.record(home, "staged", target=target, detail=f"#{staged_id} {_describe(operations)}", reason=reason)
     result = {"success": True, "applied": False, "staged_id": staged_id, "ask_user": ask}
     if not in_chat:
-        return {**result, "message": f"Skill waiting for approval as #{staged_id}. Tell the user in one line to read "
-                                     f"it with /memory-pending and approve it with /memory-approve {staged_id}. "
-                                     f"Do not ask for a yes in chat: a chat reply cannot approve a skill."}
+        kind = "Skill" if target == "skill" else "OKF draft page"
+        return {**result, "message": f"{kind} waiting for approval as #{staged_id}. Tell the user in one line to "
+                                     f"read it with /memory-pending and approve it with /memory-approve {staged_id}. "
+                                     f"Do not ask for a yes in chat: a chat reply cannot approve it."}
     if ask:
         question = question_for(staged_id, target, operations)
         return {**result, "question": question,
@@ -427,15 +428,18 @@ def _approve(home: Path, which: str) -> dict:
     done, failures = [], []
     for item in chosen:
         detail = f"#{item['id']} {_describe(item['operations'])}"
-        if item["target"] == "skill":
-            from . import skills  # skills imports store; resolve the cycle at call time
+        if item["target"] in ("skill", "okf"):
+            from . import (  # both import store; resolve the cycle at call time
+                okf,
+                skills,
+            )
 
-            error = skills.apply_staged(home, item)
+            error = (skills if item["target"] == "skill" else okf).apply_staged(home, item)
             if error:
                 failures.append(f"#{item['id']}: {error}")
-                history.record(home, "approve-failed", target="skill", detail=detail, reason=error)
+                history.record(home, "approve-failed", target=item["target"], detail=detail, reason=error)
             else:
-                history.record(home, "approved", target="skill", detail=detail)
+                history.record(home, "approved", target=item["target"], detail=detail)
                 done.append(item["id"])
             continue
         current = read_entries(home, item["target"])
@@ -482,7 +486,9 @@ def _reject(home: Path, which: str) -> dict:
 def _describe(operations: list) -> str:
     parts = []
     for op in operations:
-        if isinstance(op, dict) and op.get("name"):  # a skill operation
+        if isinstance(op, dict) and op.get("concept_id"):  # an OKF draft page
+            parts.append(f"draft OKF page {op['concept_id']}: {_one_line(op.get('title') or '')[:100]}")
+        elif isinstance(op, dict) and op.get("name"):  # a skill operation
             what = (op.get("description") or op.get("old_text") or "").strip()
             parts.append(f"{op.get('action')} skill {op['name']}: {_one_line(what)[:100]}")
         elif isinstance(op, dict):
@@ -519,6 +525,11 @@ def render_block(home: Path, target: str) -> str:
 
 def render_snapshot(home: Path) -> str:
     parts = [_GUIDANCE, render_block(home, "user"), render_block(home, "memory")]
+    bundles = load_config(home).get("okf_bundles") or []
+    if bundles:
+        parts.append(f"Company knowledge: {len(bundles)} OKF bundle(s) are configured. Before stating a company fact "
+                     "(price, metric, process, address), check it with the `okf_lookup` tool; prefer human-reviewed "
+                     "pages and say when a fact is a draft or stale. Propose new facts with `okf_draft`.")
     waiting = len(list_pending(home))
     if waiting:
         noun = "memory" if waiting == 1 else "memories"
@@ -543,8 +554,11 @@ def render_pending(home: Path) -> str:
         asked = "  (asked in chat)" if item.get("ask") else ""
         lines.append(f"#{item['id']}  [{item['target'].upper()}]  {_describe(item['operations'])}{asked}\n"
                      f"    reason: {item['reason']} · {item['created']}")
-        if item["target"] == "skill":  # show what would actually be written, not just its label
-            body = item["operations"][0].get("content") or ""
+        if item["target"] in ("skill", "okf"):  # show what would actually be written, not just its label
+            op = item["operations"][0]
+            body = op.get("content") or op.get("body") or ""
+            if op.get("bundle"):
+                lines.append(f"    bundle: {op['bundle']}")
             if body:
                 lines.append(f"    content ({len(body)} chars): {_one_line(body)[:600]}")
         else:

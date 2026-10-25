@@ -1,11 +1,11 @@
 [project]
 name = "hermes-memory"
-version = "0.3.0"
+version = "0.5.0"
 description = "Hermes-style persistent memory for Claude Code: a shared notebook loaded into every session"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-dependencies = ["mcp>=2.3,<3"]
+dependencies = ["mcp>=2.3,<3", "pyyaml>=6.0,<7"]
 
 [project.scripts]
 hermes-memory = "hermes_memory.cli:main"

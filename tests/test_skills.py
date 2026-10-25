@@ -125,7 +125,7 @@ def test_skill_tool_round_trip(off, sdir):
 
 
 def test_server_tools():
-    assert sorted(server.registered_tool_names()) == ["memory", "recall", "skill"]
+    assert sorted(server.registered_tool_names()) == ["memory", "okf_draft", "okf_lookup", "recall", "skill"]
 
 
 # ---------- review fixes ----------

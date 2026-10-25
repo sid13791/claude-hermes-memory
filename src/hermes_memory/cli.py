@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
-from . import archive, doctor, history, hooks, learning, skills, store
+from . import archive, doctor, history, hooks, learning, okf, skills, store
 
 
 def _print(text: str) -> None:
@@ -48,7 +49,30 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("archive", help="index every Claude Code transcript into the archive")
     sub.add_parser("skills", help="list skills created by hermes-memory")
     sub.add_parser("learn", help="show or set the learning-nudge interval").add_argument("every", nargs="?")
+    sub.add_parser("okf", help="list / add / remove OKF bundles").add_argument("args", nargs="?", default="")
+    sub.add_parser("okf-export", help="export memory + skills as an OKF bundle").add_argument("folder")
     return parser
+
+
+def _okf(raw: str) -> int:
+    """`okf`, `okf add <folder>`, `okf remove <folder>` (one quoted argument from the slash command)."""
+    home = store.default_home()
+    action, _, rest = (raw or "").strip().partition(" ")
+    if action in ("add", "remove") and rest.strip():
+        if action == "add":
+            try:
+                _print(f"Added OKF bundle {okf.add_bundle(home, rest.strip())}")
+            except okf.OKFError as exc:
+                _print(f"Not added: {exc}")
+                return 1
+        else:
+            _print("Removed." if okf.remove_bundle(home, rest.strip()) else "That folder was not configured.")
+        return 0
+    if action and action not in ("list",):
+        _print("use: /memory-okf, /memory-okf add <folder>, or /memory-okf remove <folder>")
+        return 1
+    _print(okf.render_bundles(home))
+    return 0
 
 
 def _learn(every: str | None) -> int:
@@ -113,6 +137,15 @@ def main(argv: list[str] | None = None) -> int:
         return _approval(args.mode)
     elif args.cmd == "learn":
         return _learn(args.every)
+    elif args.cmd == "okf":
+        return _okf(args.args)
+    elif args.cmd == "okf-export":
+        try:
+            result = okf.export(home, Path(args.folder.strip()))
+        except okf.OKFError as exc:
+            _print(f"Not exported: {exc}")
+            return 1
+        _print(f"Exported {result['concepts']} OKF pages to {result['path']}")
     elif args.cmd == "log":
         _print(history.render(home, args.limit))
     elif args.cmd == "doctor":
