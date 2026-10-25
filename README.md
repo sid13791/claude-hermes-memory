@@ -20,6 +20,9 @@ Claude Code's own per-project memory (which keeps working as before).
 | Approval queue | Notes can wait for your yes/no before they are saved (see below). |
 | Chat archive | Every chat is copied into `archive.db` (SQLite full-text search) after each turn and at session end, with secrets redacted. Claude Code deletes transcripts after 30 days; the archive keeps them. |
 | `recall` MCP tool | Claude searches past chats ("what did we decide about X?") and can scroll around a hit. No LLM cost. |
+| `skill` MCP tool | Claude saves reusable multi-step procedures as Claude Code skills in `~/.claude/skills/`. It only edits or deletes skills it created and that you have not edited since; deleted ones go to `skills-archive/`. Skills are approved only with `/memory-approve`, after `/memory-pending` shows their full text. |
+| In-chat approval | When a note needs approval, Claude ends its reply with one question naming it (`#3`). Your **next message in that same chat, within 30 minutes**, answers it: `yes` saves, `no` discards, `yes, but …` / `change …` sends it back for a rewrite, anything else leaves it waiting in `/memory-pending`. The question only counts if it really is the last line of Claude's reply. |
+| Learning check | Every few prompts Claude is reminded to save durable preferences, corrections and procedures. |
 
 Files live in `~/.claude/hermes-memory/` (override with `HERMES_MEMORY_HOME`).
 
@@ -56,7 +59,7 @@ the CLI or edit `~/.claude/hermes-memory/` directly. To close that gap, add deny
 }
 ```
 
-A later release will add in-chat yes/no confirmation that reads your typed reply through a prompt hook.
+In-chat approval is decided from **your typed reply**, read by a prompt hook, never from anything Claude writes. One residual risk: a bare `yes` or `ok` answers the pending question even if you meant it for something else Claude asked in the same reply. That is why skills, which run as instructions in every project, can only be approved with `/memory-approve`.
 
 ## Commands
 
@@ -71,6 +74,8 @@ A later release will add in-chat yes/no confirmation that reads your typed reply
 | `/memory-doctor` | Health check: folder, config, size limits, approval queue, MCP SDK, chat archive |
 | `/recall <words>` | Search all your past Claude Code chats, across every project |
 | `/memory-archive` | Copy every existing transcript into the archive (safe to re-run) |
+| `/memory-skills` | List the skills hermes-memory has created |
+| `/memory-learn [n]` | How often Claude is reminded to save what it learned (default every 6 prompts; 0 = off) |
 
 Every memory change also shows a one-line notice in the chat, for example `💾 Memory saved (52/1,375)` or
 `⏳ Memory waiting for approval #3 — /memory-pending to review`.
@@ -99,7 +104,7 @@ uv run pytest --cov=hermes_memory
 
 1. **Shared notebook**: done in 0.1.x.
 2. **Chat archive + `recall`**: done in 0.2.0.
-3. Learning loop: save reminders, flush before compaction, in-chat yes/no confirmation via a prompt hook.
+3. **Learning loop, in-chat approval, skills**: done in 0.3.0.
 4. `/memory-import`: merge existing per-project memory folders, flagging duplicates and contradictions.
 5. Optional Google OKF (Open Knowledge Format) export and lookup.
 

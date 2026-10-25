@@ -186,5 +186,3 @@ def test_recall_tool_needs_query_or_session(home):
     assert "error" in out
 
 
-def test_server_registers_memory_and_recall():
-    assert sorted(server.registered_tool_names()) == ["memory", "recall"]

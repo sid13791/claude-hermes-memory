@@ -56,3 +56,12 @@ def transcript_path(stdin_text: str) -> str | None:
         return None
     path = payload.get("transcript_path") if isinstance(payload, dict) else None
     return path if isinstance(path, str) and path else None
+
+
+def session_id(stdin_text: str) -> str:
+    try:
+        payload = json.loads(stdin_text)
+    except (json.JSONDecodeError, ValueError):
+        return ""
+    value = payload.get("session_id") if isinstance(payload, dict) else None
+    return value if isinstance(value, str) else ""

@@ -1,6 +1,6 @@
 [project]
 name = "hermes-memory"
-version = "0.2.0"
+version = "0.3.0"
 description = "Hermes-style persistent memory for Claude Code: a shared notebook loaded into every session"
 readme = "README.md"
 requires-python = ">=3.11"

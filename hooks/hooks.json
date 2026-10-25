@@ -33,6 +33,17 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --frozen --no-dev --directory \"${CLAUDE_PLUGIN_ROOT}\" hermes-memory hook prompt",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

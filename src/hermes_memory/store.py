@@ -33,7 +33,7 @@ TARGETS = {
     "memory": {"file": "MEMORY.md", "limit_key": "memory_char_limit",
                "title": "MEMORY (your notes about the user's work, shared across projects)"},
 }
-DEFAULT_CONFIG = {"approval": "auto", "user_char_limit": 1375, "memory_char_limit": 2200}
+DEFAULT_CONFIG = {"approval": "auto", "user_char_limit": 1375, "memory_char_limit": 2200, "learn_every": 6}
 
 # In "auto" mode a user-profile note still waits for approval when it reads like a work rule.
 _RULE_WORDS = re.compile(r"\b(always|never|must|mustn't|don't|do not|only ever)\b", re.IGNORECASE)
@@ -128,6 +128,11 @@ def set_approval(home: Path, mode: str) -> None:
     if mode not in MODES:
         raise ValueError(f"approval must be one of {', '.join(MODES)}")
     _save_config(home, {**load_config(home), "approval": mode})
+
+
+def set_learn_every(home: Path, every: int) -> None:
+    """How many user prompts between learning nudges (0 turns them off)."""
+    _save_config(home, {**load_config(home), "learn_every": max(0, int(every))})
 
 
 def set_limits(home: Path, *, user: int | None = None, memory: int | None = None) -> None:
@@ -283,12 +288,36 @@ def submit(home: Path, target: str, operations: list[dict]) -> dict:
             history.record(home, "saved", target=target, detail=_describe(operations))
             return {"success": True, "applied": True, "usage": _usage(home, target, after),
                     "message": "; ".join(notes) or "saved"}
-        staged_id = _stage(home, target, operations, pinned, reason)
-        history.record(home, "staged", target=target, detail=f"#{staged_id} {_describe(operations)}",
-                       reason=reason)
-    return {"success": True, "applied": False, "staged_id": staged_id, "usage": _usage(home, target, before),
-            "message": f"waiting for approval as #{staged_id} ({reason}). Ask the user to confirm; "
-                       f"they can run /memory-approve {staged_id} or /memory-reject {staged_id}."}
+        return {**stage(home, target, operations, pinned, reason), "usage": _usage(home, target, before)}
+
+
+def stage(home: Path, target: str, operations: list[dict], pinned: list[str], reason: str) -> dict:
+    """Queue a write for approval (caller holds the lock).
+
+    Notes and rules may be confirmed in chat, one at a time. Skills never are: their full text has to be
+    read with /memory-pending and approved with /memory-approve.
+    """
+    in_chat = target != "skill"
+    staged_id, ask = _stage(home, target, operations, pinned, reason, in_chat)
+    history.record(home, "staged", target=target, detail=f"#{staged_id} {_describe(operations)}", reason=reason)
+    result = {"success": True, "applied": False, "staged_id": staged_id, "ask_user": ask}
+    if not in_chat:
+        return {**result, "message": f"Skill waiting for approval as #{staged_id}. Tell the user in one line to read "
+                                     f"it with /memory-pending and approve it with /memory-approve {staged_id}. "
+                                     f"Do not ask for a yes in chat: a chat reply cannot approve a skill."}
+    if ask:
+        question = question_for(staged_id, target, operations)
+        return {**result, "question": question,
+                "message": f"Waiting for approval as #{staged_id} ({reason}). End your reply with exactly this "
+                           f"question as its own last line, with nothing after it: {question}"}
+    return {**result, "message": f"Waiting for approval as #{staged_id} ({reason}). Another note is already being "
+                                 f"asked about, so do not ask now; the user can review it with /memory-pending."}
+
+
+def question_for(staged_id: int, target: str, operations: list[dict]) -> str:
+    kind = "a note about you" if target == "user" else "a rule"
+    return (f"Save as {kind}? #{staged_id} — \"{_describe(operations)[:200]}\" — "
+            f"reply yes, no, or tell me what to change.")
 
 
 def _load_pending(home: Path) -> dict:
@@ -306,12 +335,73 @@ def _save_pending(home: Path, pending: dict) -> None:
     _write_text(home / "pending.json", json.dumps(pending, indent=2, ensure_ascii=False))
 
 
-def _stage(home: Path, target: str, operations: list[dict], pinned: list[str], reason: str) -> int:
+def _stage(home: Path, target: str, operations: list[dict], pinned: list[str], reason: str,
+           in_chat: bool) -> tuple[int, bool]:
     pending = _load_pending(home)
+    ask = in_chat and not any(i.get("ask") for i in pending["items"])
     item = {"id": pending["next_id"], "target": target, "operations": operations, "pinned": pinned,
-            "reason": reason, "created": datetime.now(UTC).isoformat(timespec="seconds")}
+            "reason": reason, "ask": ask, "armed": None, "created": datetime.now(UTC).isoformat(timespec="seconds")}
     _save_pending(home, {"next_id": item["id"] + 1, "items": pending["items"] + [item]})
-    return item["id"]
+    return item["id"], ask
+
+
+# ---------- in-chat confirmation state ----------
+# "ask"   = Claude was told to put this item's question to the user.
+# "armed" = the Stop hook saw that question at the end of Claude's reply in session S at time T.
+# Only an armed item, answered in the same session within ARM_TTL, can be approved by a chat reply.
+
+ARM_TTL_SECONDS = 30 * 60
+
+
+def _update_items(home: Path, change) -> None:
+    with _locked(home):
+        pending = _load_pending(home)
+        _save_pending(home, {**pending, "items": [change(i) for i in pending["items"]]})
+
+
+def arm(home: Path, session_id: str, last_reply: str) -> int | None:
+    """Called when Claude finishes a reply: arm the asked item if its question ends that reply."""
+    tail = last_reply.strip()[-400:]
+    target = next((i for i in list_pending(home)
+                   if i.get("ask") and f"#{i['id']}" in tail and "reply yes" in tail.lower()), None)
+    if target is None:
+        return None
+    now = datetime.now(UTC).isoformat(timespec="seconds")
+    _update_items(home, lambda i: {**i, "armed": {"session": session_id, "at": now}} if i["id"] == target["id"] else i)
+    return target["id"]
+
+
+def armed_item(home: Path, session_id: str) -> dict | None:
+    for item in list_pending(home):
+        armed = item.get("armed")
+        if not isinstance(armed, dict) or armed.get("session") != session_id:
+            continue
+        try:
+            age = (datetime.now(UTC) - datetime.fromisoformat(armed["at"])).total_seconds()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 0 <= age <= ARM_TTL_SECONDS:
+            return item
+    return None
+
+
+def disarm(home: Path, staged_id: int) -> None:
+    """The user moved on without answering: stop asking; the item stays in /memory-pending."""
+    _update_items(home, lambda i: {**i, "ask": False, "armed": None} if i["id"] == staged_id else i)
+
+
+def promote_next(home: Path) -> dict | None:
+    """After a decision, choose the oldest waiting note (not skill) as the next one to ask about."""
+    with _locked(home):
+        pending = _load_pending(home)
+        if any(i.get("ask") for i in pending["items"]):
+            return None
+        nxt = next((i for i in pending["items"] if i["target"] != "skill"), None)
+        if nxt is None:
+            return None
+        items = [{**i, "ask": True} if i["id"] == nxt["id"] else i for i in pending["items"]]
+        _save_pending(home, {**pending, "items": items})
+        return {**nxt, "ask": True}
 
 
 def list_pending(home: Path) -> list[dict]:
@@ -336,6 +426,18 @@ def _approve(home: Path, which: str) -> dict:
         return {"success": False, "error": f"no waiting memory {which!r}"}
     done, failures = [], []
     for item in chosen:
+        detail = f"#{item['id']} {_describe(item['operations'])}"
+        if item["target"] == "skill":
+            from . import skills  # skills imports store; resolve the cycle at call time
+
+            error = skills.apply_staged(home, item)
+            if error:
+                failures.append(f"#{item['id']}: {error}")
+                history.record(home, "approve-failed", target="skill", detail=detail, reason=error)
+            else:
+                history.record(home, "approved", target="skill", detail=detail)
+                done.append(item["id"])
+            continue
         current = read_entries(home, item["target"])
         changed = [p for p in item["pinned"] if p not in current]
         error = None
@@ -347,7 +449,6 @@ def _approve(home: Path, which: str) -> dict:
                 _check_cap(home, item["target"], current, after)
             except OperationError as exc:
                 error = str(exc)
-        detail = f"#{item['id']} {_describe(item['operations'])}"
         if error:
             failures.append(f"#{item['id']}: {error}")
             history.record(home, "approve-failed", target=item["target"], detail=detail, reason=error)
@@ -381,7 +482,10 @@ def _reject(home: Path, which: str) -> dict:
 def _describe(operations: list) -> str:
     parts = []
     for op in operations:
-        if isinstance(op, dict):
+        if isinstance(op, dict) and op.get("name"):  # a skill operation
+            what = (op.get("description") or op.get("old_text") or "").strip()
+            parts.append(f"{op.get('action')} skill {op['name']}: {_one_line(what)[:100]}")
+        elif isinstance(op, dict):
             parts.append(f"{op.get('action')}: {_one_line(op.get('content') or op.get('old_text') or '')[:120]}")
     return "; ".join(parts)
 
@@ -398,8 +502,10 @@ You have a persistent memory shared across ALL projects (the hermes-memory plugi
 - This block is a snapshot from session start; writes made now appear in the next session.
 - Use the `recall` tool to search past conversations (all projects) when the user refers to earlier
   work or when an earlier decision would stop you re-asking. Do not store chat history in memory.
-- If a write comes back "waiting for approval", tell the user in one line what you want to save and ask
-  them to confirm. Never claim it is saved."""
+- When you work out a reusable multi-step procedure (how this user deploys, closes the month, builds a
+  report), save it with the `skill` tool instead of a memory note; skills load only when relevant.
+- If a write comes back "waiting for approval" with a question, end your reply with that exact question
+  as its own last line and nothing after it. The user's next message answers it. Never claim it is saved."""
 
 
 def render_block(home: Path, target: str) -> str:
@@ -434,9 +540,18 @@ def render_pending(home: Path) -> str:
         return "No memories waiting for approval."
     lines = []
     for item in items:
-        ops = "; ".join(f"{op['action']}: {_one_line(op.get('content') or op.get('old_text'))}"
-                        for op in item["operations"])
-        lines.append(f"#{item['id']}  [{item['target'].upper()}]  {ops}\n"
+        asked = "  (asked in chat)" if item.get("ask") else ""
+        lines.append(f"#{item['id']}  [{item['target'].upper()}]  {_describe(item['operations'])}{asked}\n"
                      f"    reason: {item['reason']} · {item['created']}")
-        lines.extend(f"    replaces/removes: {_one_line(p)}" for p in item["pinned"])
+        if item["target"] == "skill":  # show what would actually be written, not just its label
+            body = item["operations"][0].get("content") or ""
+            if body:
+                lines.append(f"    content ({len(body)} chars): {_one_line(body)[:600]}")
+        else:
+            lines.extend(f"    replaces/removes: {_one_line(p)}" for p in item["pinned"])
     return "\n".join(lines)
+
+
+# Public aliases for sibling modules (skills, learning).
+write_text = _write_text
+locked = _locked

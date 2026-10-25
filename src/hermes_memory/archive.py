@@ -181,6 +181,26 @@ def sweep(home: Path, budget_seconds: float | None = None) -> dict:
     return stats
 
 
+def last_assistant_text(path: Path | str, tail_bytes: int = 256 * 1024) -> str:
+    """Text of Claude's most recent reply in a transcript (read from the end of the file)."""
+    path = Path(path)
+    if not path.exists():
+        return ""
+    with path.open("rb") as fh:
+        fh.seek(max(0, path.stat().st_size - tail_bytes))
+        lines = fh.read().splitlines()
+    for raw in reversed(lines):
+        try:
+            record = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        if isinstance(record, dict) and record.get("type") == "assistant" and not record.get("isSidechain"):
+            text = _text_of((record.get("message") or {}).get("content"))
+            if text:
+                return text
+    return ""
+
+
 # ---------- reading ----------
 
 def _fts_query(query: str, joiner: str) -> str:

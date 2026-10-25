@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from . import archive, doctor, history, hooks, store
+from . import archive, doctor, history, hooks, learning, skills, store
 
 
 def _print(text: str) -> None:
@@ -41,12 +41,29 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("approval").add_argument("mode", nargs="?")
     sub.add_parser("log", help="recent memory activity").add_argument("limit", type=int, nargs="?", default=20)
     sub.add_parser("doctor", help="health check")
-    sub.add_parser("hook").add_argument("event", choices=["post-tool", "stop"])
+    sub.add_parser("hook").add_argument("event", choices=["post-tool", "stop", "prompt"])
     recall = sub.add_parser("recall", help="search past conversations")
     recall.add_argument("query", nargs="+")
     recall.add_argument("--project", default="")
     sub.add_parser("archive", help="index every Claude Code transcript into the archive")
+    sub.add_parser("skills", help="list skills created by hermes-memory")
+    sub.add_parser("learn", help="show or set the learning-nudge interval").add_argument("every", nargs="?")
     return parser
+
+
+def _learn(every: str | None) -> int:
+    home = store.default_home()
+    every = (every or "").strip()
+    if not every:  # slash commands pass '' when no argument was typed
+        current = store.load_config(home).get("learn_every", 0)
+        _print(f"learning check: {'off' if not current else f'every {current} prompts'}")
+        return 0
+    if not every.isdigit():
+        _print("use a whole number of prompts, e.g. 6 (0 turns the check off)")
+        return 1
+    store.set_learn_every(home, int(every))
+    _print(f"learning check set to {'off' if int(every) == 0 else f'every {int(every)} prompts'}")
+    return 0
 
 
 def _approve_or_reject(cmd: str, which: str) -> int:
@@ -64,7 +81,8 @@ def _approve_or_reject(cmd: str, which: str) -> int:
 
 def _approval(mode: str | None) -> int:
     home = store.default_home()
-    if mode is None:
+    mode = (mode or "").strip()
+    if not mode:  # slash commands pass '' when no argument was typed
         _print(f"approval mode: {store.load_config(home)['approval']} (off | auto | on)")
         return 0
     try:
@@ -93,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
         return _approve_or_reject(args.cmd, args.which)
     elif args.cmd == "approval":
         return _approval(args.mode)
+    elif args.cmd == "learn":
+        return _learn(args.every)
     elif args.cmd == "log":
         _print(history.render(home, args.limit))
     elif args.cmd == "doctor":
@@ -105,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "recall":
         _safe_sweep(home, budget_seconds=5)
         _print(archive.render_hits(archive.search(home, " ".join(args.query), limit=10, project=args.project)))
+    elif args.cmd == "skills":
+        _print(skills.render(home))
     elif args.cmd == "archive":
         result = archive.sweep(home)
         totals = archive.stats(home)
@@ -131,12 +153,26 @@ def _hook(event: str, stdin_text: str) -> int:
         except Exception as exc:  # noqa: BLE001 - a notice must never break the session
             history.record(store.default_home(), "hook-error", reason=str(exc)[:200])
         return 0
+    if event == "prompt":
+        try:
+            payload = json.loads(stdin_text)
+            result = learning.handle_prompt(store.default_home(), payload) if isinstance(payload, dict) else {}
+            if result:
+                _print(json.dumps(result, ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001 - a hook must never block the user's prompt
+            history.record(store.default_home(), "hook-error", reason=str(exc)[:200])
+        return 0
     path = hooks.transcript_path(stdin_text)
     if path:
+        home = store.default_home()
         try:
-            archive.index_file(store.default_home(), path)
+            archive.index_file(home, path)
         except Exception as exc:  # noqa: BLE001 - a hook must never break the session
-            history.record(store.default_home(), "archive-error", reason=str(exc)[:200])
+            history.record(home, "archive-error", reason=str(exc)[:200])
+        try:
+            learning.handle_stop(home, hooks.session_id(stdin_text), archive.last_assistant_text(path))
+        except Exception as exc:  # noqa: BLE001 - a hook must never break the session
+            history.record(home, "hook-error", reason=str(exc)[:200])
     return 0
 
 
