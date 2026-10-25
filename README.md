@@ -10,6 +10,10 @@ Claude Code's own per-project memory (which keeps working as before).
 
 ## How it works
 
+![hermes-memory architecture](docs/architecture.png)
+
+_Editable source: [docs/architecture.excalidraw](docs/architecture.excalidraw) (open it at excalidraw.com)._
+
 | Piece | What it does |
 |---|---|
 | `USER.md` | Notes about you: preferences, communication style. Cap 1,375 chars. |
@@ -125,8 +129,7 @@ uv run pytest --cov=hermes_memory
 1. **Shared notebook**: done in 0.1.x.
 2. **Chat archive + `recall`**: done in 0.2.0.
 3. **Learning loop, in-chat approval, skills**: done in 0.3.0.
-4. `/memory-import`: merge existing per-project memory folders, flagging duplicates and contradictions (planned).
-5. **Google OKF lookup, drafts and export**: done in 0.5.0.
+4. **Google OKF lookup, drafts and export**: done in 0.5.0.
 
 ## License
 
