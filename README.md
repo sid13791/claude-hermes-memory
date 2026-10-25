@@ -61,6 +61,11 @@ A later release will add in-chat yes/no confirmation that reads your typed reply
 | `/memory-approve <id\|all>` | Save a waiting note |
 | `/memory-reject <id\|all>` | Throw a waiting note away |
 | `/memory-approval [off\|auto\|on]` | Show or change the approval mode |
+| `/memory-log [n]` | Recent activity: saved / waiting / approved / rejected / blocked, with project and reason |
+| `/memory-doctor` | Health check: folder, config, size limits, approval queue, MCP SDK |
+
+Every memory change also shows a one-line notice in the chat, for example `💾 Memory saved (52/1,375)` or
+`⏳ Memory waiting for approval #3 — /memory-pending to review`.
 
 ## Install
 

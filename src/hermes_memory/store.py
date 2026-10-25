@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from . import history
 from .security import scan
 
 DELIM = "\n§\n"
@@ -263,6 +264,9 @@ def submit(home: Path, target: str, operations: list[dict]) -> dict:
         content = op.get("content") if isinstance(op, dict) else None
         reasons = scan(content) if isinstance(content, str) else []
         if reasons:
+            # The blocked text itself is not logged: it may be the very secret we refused.
+            history.record(home, "blocked", target=target, detail="(content not logged)",
+                           reason="; ".join(reasons))
             return {"success": False, "error": f"blocked: {'; '.join(reasons)}"}
     with _locked(home):
         before = read_entries(home, target)
@@ -270,14 +274,18 @@ def submit(home: Path, target: str, operations: list[dict]) -> dict:
             after, notes, pinned = apply_operations(before, operations)
             _check_cap(home, target, before, after)
         except OperationError as exc:
+            history.record(home, "refused", target=target, detail=_describe(operations), reason=str(exc))
             return {"success": False, "error": str(exc), **exc.details}
 
         reason = _approval_reason(load_config(home)["approval"], target, operations)
         if reason is None:
             _write_entries(home, target, after)
+            history.record(home, "saved", target=target, detail=_describe(operations))
             return {"success": True, "applied": True, "usage": _usage(home, target, after),
                     "message": "; ".join(notes) or "saved"}
         staged_id = _stage(home, target, operations, pinned, reason)
+        history.record(home, "staged", target=target, detail=f"#{staged_id} {_describe(operations)}",
+                       reason=reason)
     return {"success": True, "applied": False, "staged_id": staged_id, "usage": _usage(home, target, before),
             "message": f"waiting for approval as #{staged_id} ({reason}). Ask the user to confirm; "
                        f"they can run /memory-approve {staged_id} or /memory-reject {staged_id}."}
@@ -330,16 +338,22 @@ def _approve(home: Path, which: str) -> dict:
     for item in chosen:
         current = read_entries(home, item["target"])
         changed = [p for p in item["pinned"] if p not in current]
+        error = None
         if changed:
-            failures.append(f"#{item['id']}: the note it targets changed since it was staged; reject it")
-            continue
-        try:
-            after, _, _ = apply_operations(current, item["operations"])
-            _check_cap(home, item["target"], current, after)
-        except OperationError as exc:
-            failures.append(f"#{item['id']}: {exc}")
+            error = "the note it targets changed since it was staged; reject it"
+        else:
+            try:
+                after, _, _ = apply_operations(current, item["operations"])
+                _check_cap(home, item["target"], current, after)
+            except OperationError as exc:
+                error = str(exc)
+        detail = f"#{item['id']} {_describe(item['operations'])}"
+        if error:
+            failures.append(f"#{item['id']}: {error}")
+            history.record(home, "approve-failed", target=item["target"], detail=detail, reason=error)
             continue
         _write_entries(home, item["target"], after)
+        history.record(home, "approved", target=item["target"], detail=detail)
         done.append(item["id"])
     _save_pending(home, {**pending, "items": [i for i in pending["items"] if i["id"] not in done]})
     if failures:
@@ -358,7 +372,18 @@ def _reject(home: Path, which: str) -> dict:
         return {"success": False, "error": f"no waiting memory {which!r}"}
     ids = {i["id"] for i in chosen}
     _save_pending(home, {**pending, "items": [i for i in pending["items"] if i["id"] not in ids]})
+    for item in chosen:
+        history.record(home, "rejected", target=item["target"],
+                       detail=f"#{item['id']} {_describe(item['operations'])}")
     return {"success": True, "rejected": sorted(ids)}
+
+
+def _describe(operations: list) -> str:
+    parts = []
+    for op in operations:
+        if isinstance(op, dict):
+            parts.append(f"{op.get('action')}: {_one_line(op.get('content') or op.get('old_text') or '')[:120]}")
+    return "; ".join(parts)
 
 
 # ---------- rendering ----------

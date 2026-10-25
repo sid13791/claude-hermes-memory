@@ -10,6 +10,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*hermes-memory.*__memory",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --no-dev --directory \"${CLAUDE_PLUGIN_ROOT}\" hermes-memory hook post-tool",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }
